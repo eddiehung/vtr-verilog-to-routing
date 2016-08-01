@@ -3,11 +3,22 @@
 ##############################################################################
 
 This is a work-in-progress fork of VTR7.0 (at least what I think is VTR7.0!)
-but supporting Yosys instead of ODIN_II as its front end.
+but supporting [Yosys](https://github.com/cliffordwolf/yosys) instead of ODIN_II as its front end.
 
 This Yosys front-end plumbing was done as part of the [VTR-to-Bitstream V2.0](http://eddiehung.github.io/vtb.html) 
 project, and was mostly taken from there, but without any of the destructive 
 back-end mods I made for VPR to support Xilinx architectures.
+
+Usage is:
+
+./run_vtr_flow.pl ../benchmarks/verilog/diffeq1_yosys.v ../arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml -yosys
+
+Note the "-yosys" argument, plus the "diffeq1_yosys.v" benchmark, which is a
+carbon-copy of the original ("diffeq1.v") but with a Verilog attribute (* top *)
+attached to the top level module, and with any RTL changes necessary for Yosys
+to support that circuit.
+
+Currently, it's untested, and I can't promise I'll be able to support it.
 
 ##############################################################################
 
