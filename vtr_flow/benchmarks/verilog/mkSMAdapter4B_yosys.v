@@ -3398,7 +3398,8 @@ parameter max_size = 1<<aw;
 
 module generic_fifo_sc_a(clk, rst, clr, din, we, dout, re,
 			 full_r, empty_r,
-			 full_n_r, empty_n_r);
+			 full_n_r, empty_n_r,
+		 	 full, empty, level, full_n, empty_n);
  /*
 parameter dw=8;
 parameter aw=8;
@@ -3787,7 +3788,8 @@ parameter max_size = 1<<aw;
 
 module generic_fifo_sc_b(clk, rst, clr, din, we, dout, re,
 			 full_r, empty_r,
-			 full_n_r, empty_n_r);
+			 full_n_r, empty_n_r,
+		 	 full, empty, level, full_n, empty_n);
  /*
 parameter dw=8;
 parameter aw=8;
@@ -4178,7 +4180,8 @@ parameter max_size = 1<<aw;
 
 module generic_fifo_sc_c(clk, rst, clr, din, we, dout, re,
 			 full_r, empty_r,
-			 full_n_r, empty_n_r);
+			 full_n_r, empty_n_r,
+		 	 full, empty, level, full_n, empty_n);
  /*
 parameter dw=8;
 parameter aw=8;

@@ -28,6 +28,7 @@ use File::Spec;
 use POSIX;
 use File::Copy;
 use FindBin;
+use File::Basename;
 
 use lib "$FindBin::Bin/perl_libs/XML-TreePP-0.41/lib";
 use XML::TreePP;
@@ -53,23 +54,23 @@ sub file_find_and_replace;
 sub xml_find_LUT_Kvalue;
 sub xml_find_mem_size;
 
-my $temp_dir = "./temp";
+my $temp_dir = "";
 
-my $stage_idx_odin   = 1;
-my $stage_idx_abc    = 2;
-my $stage_idx_ace    = 3;
-my $stage_idx_prevpr = 4;
-my $stage_idx_vpr    = 5;
+my $stage_idx_odin      = 1;
+my $stage_idx_abc       = 2;
+my $stage_idx_ace       = 3;
+my $stage_idx_prevpr    = 4;
+my $stage_idx_vpr       = 5;
 
 my $circuit_file_path      = expand_user_path( shift(@ARGV) );
 my $architecture_file_path = expand_user_path( shift(@ARGV) );
-my $sdc_file_path;
+my $sdc_file_path = "\"\"";
 
 my $token;
 my $ext;
 my $starting_stage          = stage_index("odin");
 my $ending_stage            = stage_index("vpr");
-my $keep_intermediate_files = 0;
+my $keep_intermediate_files = 1;
 my $has_memory              = 1;
 my $timing_driven           = "on";
 my $min_chan_width          = -1; 
@@ -79,8 +80,17 @@ my $tech_file               = "";
 my $do_power                = 0;
 my $check_equivalent		= "off";
 my $gen_postsynthesis_netlist 	= "off";
-my $seed					= 1;
+my $seed			= 1;
 my $min_hard_adder_size		= 1;
+my @vpr_options             = qw(--allow_unrelated_clustering off);
+my $vpr_fix_pins            = "random";
+my $yosys_script            = "";
+my $yosys_script_default    = "yosys.ys";
+my $yosys_models            = "";
+my $yosys_models_default    = "yosys_models.v";
+my $yosys_abc_script        = "";
+my $yosys_abc_script_default = "abc_vtr.rc";
+my $abc_lut_file            = "abc_lut6.lut";
 
 while ( $token = shift(@ARGV) ) {
 	if ( $token eq "-sdc_file" ) {
@@ -131,6 +141,27 @@ while ( $token = shift(@ARGV) ) {
 	elsif ( $token eq "-min_hard_adder_size" ) {
 		$min_hard_adder_size = shift(@ARGV);
 	}
+	elsif ( $token eq "-yosys" ) {
+		$yosys_script = $yosys_script_default;
+	}
+	elsif ( $token eq "-yosys_script" ) {
+		$yosys_script = shift(@ARGV);
+	}
+	elsif ( $token eq "-yosys_models" ) {
+		$yosys_models = shift(@ARGV);
+	}
+	elsif ( $token eq "-yosys_abc_script" ) {
+		$yosys_abc_script = shift(@ARGV);
+	}
+	elsif ( $token eq "-abc_lut" ) {
+		$abc_lut_file = shift(@ARGV);
+	}
+	elsif ( $token eq "-vpr_options" ) {
+		push(@vpr_options, split(' ', shift(@ARGV)));
+	}
+	elsif ($token eq "-vpr_fix_pins") {
+		$vpr_fix_pins = shift(@ARGV);
+	}
 	else {
 		die "Error: Invalid argument ($token)\n";
 	}
@@ -163,8 +194,17 @@ if ( $vpr_cluster_seed_type eq "" ) {
 	}
 }
 
+# Test for file existence
+( -f $circuit_file_path )
+  or die "Circuit file not found ($circuit_file_path)";
+( -f $architecture_file_path )
+  or die "Architecture file not found ($architecture_file_path)";
+
+if ( $temp_dir eq "" ) {
+	$temp_dir = basename($architecture_file_path,".xml")."/".basename($circuit_file_path,".v");
+}
 if ( !-d $temp_dir ) {
-	system "mkdir $temp_dir";
+	system "mkdir -p $temp_dir";
 }
 -d $temp_dir or die "Could not make temporary directory ($temp_dir)\n";
 if ( !( $temp_dir =~ /.*\/$/ ) ) {
@@ -181,11 +221,6 @@ my $arch_param;
 my $cluster_size;
 my $inputs_per_cluster = -1;
 
-# Test for file existance
-( -f $circuit_file_path )
-  or die "Circuit file not found ($circuit_file_path)";
-( -f $architecture_file_path )
-  or die "Architecture file not found ($architecture_file_path)";
 
 if ( !-e $sdc_file_path ) {
 	# open( OUTPUT_FILE, ">$sdc_file_path" ); 
@@ -198,41 +233,102 @@ if ( $stage_idx_vpr >= $starting_stage and $stage_idx_vpr <= $ending_stage ) {
 	$vpr_path = "$vtr_flow_path/../vpr/vpr";
 	( -r $vpr_path or -r "${vpr_path}.exe" )
 	  or die "Cannot find vpr exectuable ($vpr_path)";
+
+  	if ($vpr_fix_pins ne "random") {
+		( -r $vpr_fix_pins ) or die "Cannot find $vpr_fix_pins!";
+		copy($vpr_fix_pins, $temp_dir);
+		$vpr_fix_pins = basename($vpr_fix_pins);
+	}
 }
 
 my $odin2_path;
 my $odin_config_file_name;
 my $odin_config_file_path;
+my $yosys_path;
+my $yosys_config_file_name;
+my $yosys_config_file_path;
+my $yosys_abc_script_file_path;
+
+my $models_file_path_default;
+my $models_file_path;
+my $abc_rc_path;
+my $yosys_abc_script_path;
+
 if (    $stage_idx_odin >= $starting_stage
 	and $stage_idx_odin <= $ending_stage )
 {
-	$odin2_path = "$vtr_flow_path/../ODIN_II/odin_II.exe";
-	( -e $odin2_path )
-	  or die "Cannot find ODIN_II executable ($odin2_path)";
+	if ($yosys_script eq "") {
+		$odin2_path = "$vtr_flow_path/../ODIN_II/odin_II.exe";
+		( -e $odin2_path )
+			or die "Cannot find ODIN_II executable ($odin2_path)";
 
-	$odin_config_file_name = "basic_odin_config_split.xml";
+		$odin_config_file_name = "basic_odin_config_split.xml";
 
-	$odin_config_file_path = "$vtr_flow_path/misc/$odin_config_file_name";
-	( -e $odin_config_file_path )
-	  or die "Cannot find ODIN config template ($odin_config_file_path)";
+		$odin_config_file_path = "$vtr_flow_path/misc/$odin_config_file_name";
+		( -e $odin_config_file_path )
+			or die "Cannot find ODIN config template ($odin_config_file_path)";
 
-	$odin_config_file_name = "odin_config.xml";
-	my $odin_config_file_path_new = "$temp_dir" . "odin_config.xml";
-	copy( $odin_config_file_path, $odin_config_file_path_new );
-	$odin_config_file_path = $odin_config_file_path_new;
+		$odin_config_file_name = "odin_config.xml";
+		my $odin_config_file_path_new = "$temp_dir" . "odin_config.xml";
+		copy( $odin_config_file_path, $odin_config_file_path_new );
+		$odin_config_file_path = $odin_config_file_path_new;
+	}
+	else
+	{
+		$yosys_path = "$vtr_flow_path/../yosys/yosys";
+		( -e $yosys_path )
+			or die "Cannot find Yosys executable ($yosys_path)";
+
+		$yosys_config_file_name = $yosys_script;
+		$yosys_config_file_path = "$vtr_flow_path/misc/$yosys_config_file_name";
+		( -e $yosys_config_file_path )
+			or die "Cannot find Yosys script ($yosys_config_file_path)";
+
+		my $yosys_config_file_path_new = "$temp_dir" . "$yosys_config_file_name";
+		copy( $yosys_config_file_path, $yosys_config_file_path_new );
+		$yosys_config_file_path = $yosys_config_file_path_new;
+
+		my $tech_file_name;
+		$tech_file_name = "single_port_ram.v";
+		copy( "$vtr_flow_path/misc/$tech_file_name", "$temp_dir"."$tech_file_name" );
+		$tech_file_name = "dual_port_ram.v";
+		copy( "$vtr_flow_path/misc/$tech_file_name", "$temp_dir"."$tech_file_name" );
+		$tech_file_name = "adder.v";
+		copy( "$vtr_flow_path/misc/$tech_file_name", "$temp_dir"."$tech_file_name" );
+		$tech_file_name = "multiply.v";
+		copy( "$vtr_flow_path/misc/$tech_file_name", "$temp_dir"."$tech_file_name" );
+
+		my $models_file_name = $yosys_models_default;
+		$models_file_path_default = "$temp_dir"."$models_file_name";
+		copy( "$vtr_flow_path/misc/$models_file_name", "$models_file_path_default" );
+
+		$models_file_name = $yosys_models;
+		if ($models_file_name ne "") {
+			$models_file_path = "$temp_dir"."$models_file_name";
+			copy( "$vtr_flow_path/misc/$models_file_name", "$models_file_path" );
+		}
+
+		if ($yosys_abc_script eq "") { 
+			$yosys_abc_script = $yosys_abc_script_default;
+		}
+		$yosys_abc_script_path = "$temp_dir"."$yosys_abc_script";
+		copy( "$vtr_flow_path/misc/$yosys_abc_script", $yosys_abc_script_path );
+	}
 }
 
 my $abc_path;
-my $abc_rc_path;
+$abc_rc_path = "$vtr_flow_path/../abc_with_bb_support/abc.rc";
+( -e $abc_rc_path ) or die "Cannot find ABC RC file ($abc_rc_path)";
+copy( $abc_rc_path, $temp_dir );
+
+my $abc_lut_path = "$vtr_flow_path/misc/$abc_lut_file";
+( -e $abc_lut_path ) or die "Cannot find ABC LUT file ($abc_lut_path)";
+copy( $abc_lut_path, $temp_dir );
+
+$abc_path = "$vtr_flow_path/../abc_with_bb_support/abc";
 if ( $stage_idx_abc >= $starting_stage and $stage_idx_abc <= $ending_stage ) {
-	$abc_path = "$vtr_flow_path/../abc_with_bb_support/abc";
 	( -e $abc_path or -e "${abc_path}.exe" )
 	  or die "Cannot find ABC executable ($abc_path)";
-
-	$abc_rc_path = "$vtr_flow_path/../abc_with_bb_support/abc.rc";
-	( -e $abc_rc_path ) or die "Cannot find ABC RC file ($abc_rc_path)";
-
-	copy( $abc_rc_path, $temp_dir );
 }
 
 my $ace_path;
@@ -254,7 +350,7 @@ my $architecture_file_name = $1;
 
 $architecture_file_name =~ m/(.*).xml$/;
 my $architecture_name = $1;
-print "$architecture_name/$benchmark_name...";
+print "$architecture_name/$benchmark_name...\n";
 
 # Get Memory Size
 my $mem_size = -1;
@@ -267,14 +363,19 @@ my $tpp      = XML::TreePP->new();
 my $xml_tree = $tpp->parsefile($architecture_file_path);
 
 # Get lut size
-my $lut_size = xml_find_LUT_Kvalue($xml_tree);
 if ( $lut_size < 1 ) {
-	print "failed: cannot determine arch LUT k-value";
-	$error_code = 1;
+	$lut_size = xml_find_LUT_Kvalue($xml_tree);
+	if ( $lut_size < 1 ) {
+		print "failed: cannot determine arch LUT k-value";
+		$error_code = 1;
+	}
 }
+print "LUT size: $lut_size\n";
 
 # Get memory size
 $mem_size = xml_find_mem_size($xml_tree);
+print "MEM size: $mem_size\n";
+print "Min Hard Adder size: $min_hard_adder_size\n";
 
 my $odin_output_file_name =
   "$benchmark_name" . file_ext_for_stage($stage_idx_odin);
@@ -305,10 +406,11 @@ my $vpr_route_output_file_path = "$temp_dir$vpr_route_output_file_name";
 
 my $architecture_file_path_new = "$temp_dir$architecture_file_name";
 copy( $architecture_file_path, $architecture_file_path_new );
+my $architecture_file_path_orig = $architecture_file_path;
 $architecture_file_path = $architecture_file_path_new;
 
 my $circuit_file_path_new =
-  "$temp_dir$benchmark_name" . file_ext_for_stage( $starting_stage - 1 );
+  "$temp_dir$benchmark_name" . file_ext_for_stage(0);
 copy( $circuit_file_path, $circuit_file_path_new );
 $circuit_file_path = $circuit_file_path_new;
 
@@ -322,35 +424,77 @@ my $q         = "not_run";
 
 if ( $starting_stage <= $stage_idx_odin and !$error_code ) {
 
-	#system "sed 's/XXX/$benchmark_name.v/g' < $odin2_base_config > temp1.xml";
-	#system "sed 's/YYY/$arch_name/g' < temp1.xml > temp2.xml";
-	#system "sed 's/ZZZ/$odin_output_file_path/g' < temp2.xml > temp3.xml";
-	#system "sed 's/PPP/$mem_size/g' < temp3.xml > circuit_config.xml";
+	unlink "$odin_output_file_path";
+	if ($yosys_script eq "") {
+		#system "sed 's/XXX/$benchmark_name.v/g' < $odin2_base_config > temp1.xml";
+		#system "sed 's/YYY/$arch_name/g' < temp1.xml > temp2.xml";
+		#system "sed 's/ZZZ/$odin_output_file_path/g' < temp2.xml > temp3.xml";
+		#system "sed 's/PPP/$mem_size/g' < temp3.xml > circuit_config.xml";
 
-	file_find_and_replace( $odin_config_file_path, "XXX", $circuit_file_name );
-	file_find_and_replace( $odin_config_file_path, "YYY",
-		$architecture_file_name );
-	file_find_and_replace( $odin_config_file_path, "ZZZ",
-		$odin_output_file_name );
-	file_find_and_replace( $odin_config_file_path, "PPP", $mem_size );
-	file_find_and_replace( $odin_config_file_path, "AAA", $min_hard_adder_size );
+		file_find_and_replace( $odin_config_file_path, "XXX", $circuit_file_name );
+		file_find_and_replace( $odin_config_file_path, "YYY",
+			$architecture_file_name );
+		file_find_and_replace( $odin_config_file_path, "ZZZ",
+			$odin_output_file_name );
+		file_find_and_replace( $odin_config_file_path, "PPP", $mem_size );
+		file_find_and_replace( $odin_config_file_path, "AAA", $min_hard_adder_size );
 
-	if ( !$error_code ) {
-		$q =
-		  &system_with_timeout( "$odin2_path", "odin.out", $timeout, $temp_dir,
-			"-c", $odin_config_file_name );
+		if ( !$error_code ) {
+			$q =
+			&system_with_timeout( "$odin2_path", "odin.out", $timeout, $temp_dir,
+				"-c", $odin_config_file_name );
 
-		if ( -e $odin_output_file_path ) {
-			if ( !$keep_intermediate_files ) {
-				system "rm -f ${temp_dir}*.dot";
-				system "rm -f ${temp_dir}*.v";
-				system "rm -f $odin_config_file_path";
+			if ( -e $odin_output_file_path ) {
+				if ( !$keep_intermediate_files ) {
+					system "rm -f ${temp_dir}*.dot";
+					system "rm -f ${temp_dir}*.v";
+					system "rm -f $odin_config_file_path";
+				}
+			}
+			else {
+				print "failed: odin";
+				$error_code = 1;
 			}
 		}
-		else {
-			print "failed: odin";
-			$error_code = 1;
+	}
+	else {
+		file_find_and_replace( $yosys_config_file_path, "XXX", $circuit_file_name );
+		file_find_and_replace( $yosys_config_file_path, "ZZZ",
+			$odin_output_file_name );
+		file_find_and_replace( $yosys_config_file_path, "SSS",
+			$benchmark_name );
+			
+		#file_find_and_replace( $yosys_config_file_path, "LUTSIZE", $lut_size );
+		file_find_and_replace( $yosys_config_file_path, "ABCEXE", $abc_path );
+		file_find_and_replace( $yosys_config_file_path, "ABCSCRIPT", $yosys_abc_script );
+
+		file_find_and_replace( $yosys_abc_script_path, "ABCLUT", $abc_lut_file );
+
+		file_find_and_replace( $models_file_path_default, "PPP", $mem_size );
+		file_find_and_replace( $models_file_path_default, "AAA", $min_hard_adder_size );
+		if ($models_file_path ne "") {
+			file_find_and_replace( $models_file_path, "PPP", $mem_size );
+			file_find_and_replace( $models_file_path, "AAA", $min_hard_adder_size );
 		}
+
+		if ( !$error_code ) {
+			$q =
+			&system_with_timeout( "$yosys_path", "yosys.out", $timeout, $temp_dir,
+				"-v 2", $yosys_config_file_name );
+
+			if ( -e $odin_output_file_path ) {
+				if ( !$keep_intermediate_files ) {
+					system "rm -f ${temp_dir}*.dot";
+					system "rm -f ${temp_dir}*.v";
+					system "rm -f $odin_config_file_path";
+				}
+			}
+			else {
+				print "failed: yosys";
+				$error_code = 1;
+			}
+		}
+
 	}
 }
 
@@ -361,9 +505,19 @@ if (    $starting_stage <= $stage_idx_abc
 	and $ending_stage >= $stage_idx_abc
 	and !$error_code )
 {
-	$q = &system_with_timeout( $abc_path, "abc.out", $timeout, $temp_dir, "-c",
-		"read $odin_output_file_name; time; resyn; resyn2; if -K $lut_size; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; write_hie $odin_output_file_name $abc_output_file_name; print_stats"
-	);
+	if ($yosys_script eq "") {
+		unlink "$abc_output_file_path";
+		$q = &system_with_timeout( $abc_path, "abc.out", $timeout, $temp_dir, "-c",
+			"read $odin_output_file_name; read_lut $abc_lut_file; time; resyn; resyn2; if -K $lut_size; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; scleanup; time; print_stats; write_hie $odin_output_file_name $abc_output_file_name"
+		);
+	}
+	else
+	{
+	    unlink "$abc_output_file_path";
+	    $q = &system_with_timeout( $abc_path, "abc.out", $timeout, $temp_dir, "-c",
+	    	"read $odin_output_file_name; print_stats; write_hie $odin_output_file_name $abc_output_file_name"
+	    );
+    }
 
 	if ( -e $abc_output_file_path ) {
 
@@ -437,7 +591,16 @@ if (    $starting_stage <= $stage_idx_prevpr
 ################################## VPR ##########################################
 #################################################################################
 
-if ( $ending_stage >= $stage_idx_vpr and !$error_code ) {
+if ( $starting_stage <= $stage_idx_vpr 
+	and $ending_stage >= $stage_idx_vpr 
+	and !$error_code ) 
+{
+	#(my $rrg_file_path = File::Spec->rel2abs($architecture_file_path_orig)) =~ s{\.[^.]+$}{.rrg.gz};
+	#(-e "$rrg_file_path") or die("$rrg_file_path does not exist!");
+	#unless(-e "$temp_dir/".basename($rrg_file_path)) {
+	#	symlink($rrg_file_path, "$temp_dir/".basename($rrg_file_path)) or die;
+	#}
+
 	my @vpr_power_args;
 
 	if ($do_power) {
@@ -456,6 +619,7 @@ if ( $ending_stage >= $stage_idx_vpr and !$error_code ) {
 			"--cluster_seed_type",        "$vpr_cluster_seed_type",
 			"--sdc_file", 				  "$sdc_file_path",
 			"--seed",			 		  "$seed",
+			@vpr_options,
 			"--nodisp"
 		);
 		if ( $timing_driven eq "on" ) {
@@ -517,11 +681,16 @@ if ( $ending_stage >= $stage_idx_vpr and !$error_code ) {
 			"--nodisp",                   "--cluster_seed_type",
 			"$vpr_cluster_seed_type",     @vpr_power_args,
 			"--gen_postsynthesis_netlist", "$gen_postsynthesis_netlist",
-			"--sdc_file",				  "$sdc_file_path"
+			"--sdc_file",				  "$sdc_file_path",
+			"--seed",			"$seed",
+			"--fix_pins",			"$vpr_fix_pins",
+			@vpr_options
 		);
 	}
 	  					
-	if (-e $vpr_route_output_file_path and $q eq "success")
+	if (
+		-e $vpr_route_output_file_path and 
+		$q eq "success")
 	{
 		if($check_equivalent eq "on") {
 			if($abc_path eq "") {
@@ -591,7 +760,7 @@ close(RESULTS);
 #system "rm -f gc.txt";
 
 if ( !$error_code ) {
-	system "rm -f *.echo";
+	#system "rm -f *.echo";
 	print "OK";
 }
 print "\n";
@@ -618,7 +787,7 @@ sub system_with_timeout {
 		chdir $_[3];
 
 		
-		open( STDOUT, "> $_[1]" );
+		open( STDOUT, "| tee $_[1]" );
 		open( STDERR, ">&STDOUT" );
 		
 
@@ -634,7 +803,7 @@ sub system_with_timeout {
 		# like redirects so that perl will use execvp and $pid will actually be
 		# that of vpr so we can kill it later.
 		print "\n$_[0] @VPRARGS\n";
-		exec $_[0], @VPRARGS;
+		exec "/usr/bin/time", "-v", $_[0], @VPRARGS;
 	}
 	else {
 		my $timed_out = "false";

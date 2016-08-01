@@ -331,7 +331,8 @@ Abc_Ntk_t * Abc_NtkDup( Abc_Ntk_t * pNtk )
         // duplicate the nets and nodes (CIs/COs/latches already dupped)
         Abc_NtkForEachObj( pNtk, pObj, i )
             if ( pObj->pCopy == NULL )
-                Abc_NtkDupObj(pNtkNew, pObj, 0);
+		/* EH: Copy name (last parameter) when duplicating object */
+                Abc_NtkDupObj(pNtkNew, pObj, 1);
         // reconnect all objects (no need to transfer attributes on edges)
         Abc_NtkForEachObj( pNtk, pObj, i )
             if ( !Abc_ObjIsBox(pObj) && !Abc_ObjIsBo(pObj) )

@@ -935,6 +935,7 @@
 `define OR1200_DCFGR_RES1		28'h0000000
  
 
+(* top *)
 module or1200( // or1200_cpu
 	// Clk & Rst
 	clk, rst,
