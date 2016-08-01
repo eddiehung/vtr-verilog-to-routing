@@ -2,7 +2,7 @@
 # vtr-with-yosys
 ##############################################################################
 
-This is a work-in-progress fork of VTR7.0 (at least what I think is VTR7.0!)
+This is a work-in-progress fork of VTR7.0 (at least what I think is [VTR7.0](https://github.com/eddiehung/vtr-with-yosys/releases/tag/vtr-7-i-think)!)
 but supporting [Yosys](https://github.com/cliffordwolf/yosys) instead of ODIN_II as its front end.
 
 This Yosys front-end plumbing was done as part of the [VTR-to-Bitstream V2.0](http://eddiehung.github.io/vtb.html) 
