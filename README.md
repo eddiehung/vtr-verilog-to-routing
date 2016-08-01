@@ -11,16 +11,18 @@ back-end mods I made for VPR to support Xilinx architectures.
 
 Usage is:
 
+```
 ./run_vtr_flow.pl ../benchmarks/verilog/diffeq1_yosys.v ../arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml -yosys
+```
 
-Note the "-yosys" argument, plus the "diffeq1_yosys.v" benchmark, which is a
-carbon-copy of the original ("diffeq1.v") but with a Verilog attribute (* top *)
+Note the "`-yosys`" argument, plus the "`diffeq1_yosys.v`" benchmark, which is a
+carbon-copy of the original ("`diffeq1.v`") but with a Verilog attribute `(* top *)`
 attached to the top level module, and with any RTL changes necessary for Yosys
 to support that circuit.
 
 Currently, it's untested, and I can't promise I'll be able to support it.
 
-##############################################################################
+---
 
 This is the development trunk for the Verilog-to-Routing project.  Unlike the 
 nicely packaged release that we create, you are working with code in a constant 
