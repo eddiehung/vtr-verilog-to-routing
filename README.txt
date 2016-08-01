@@ -1,3 +1,16 @@
+##############################################################################
+# vtr-with-yosys
+##############################################################################
+
+This is a work-in-progress fork of VTR7.0 (at least what I think is VTR7.0!)
+but supporting Yosys instead of ODIN_II as its front end.
+
+This Yosys front-end plumbing was done as part of the [VTR-to-Bitstream V2.0](http://eddiehung.github.io/vtb.html) 
+project, and was mostly taken from there, but without any of the destructive 
+back-end mods I made for VPR to support Xilinx architectures.
+
+##############################################################################
+
 This is the development trunk for the Verilog-to-Routing project.  Unlike the 
 nicely packaged release that we create, you are working with code in a constant 
 state of flux.  You should expect that the tools are not always stable and that 
