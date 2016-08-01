@@ -80,7 +80,7 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o, \
 
 DEP = $(OBJ:.o=.d)
 
-all: CTAGS $(EXEO)
+all: $(EXEO)
 
 $(EXEO): $(OBJ)
 	g++ $(C_FLAGS) $(FLAGS) $(OBJ) -o $(EXEO) $(LIB)

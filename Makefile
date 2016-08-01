@@ -2,7 +2,7 @@
 # Makefile to build CAD tools in Verilog-to-Routing (VTR) Framework #
 #####################################################################
 
-SUBDIRS = ODIN_II vpr abc_with_bb_support libarchfpga libcommon_c/pcre libcommon_c++ ace2
+SUBDIRS = ODIN_II vpr abc_with_bb_support libarchfpga libcommon_c/pcre libcommon_c++ ace2 yosys
 
 all: notifications subdirs
 
@@ -10,7 +10,7 @@ subdirs: $(SUBDIRS)
 
 $(SUBDIRS):
 	@ $(MAKE) -C $@ --no-print-directory
-	
+
 notifications: 
 # checks if required packages are installed, and notifies the user if not
 	@ if cat /etc/issue | grep Ubuntu -c >>/dev/null; then if ! dpkg -l | grep exuberant-ctags -c >>/dev/null; then echo "\n\n\n\n***************************************************************\n* Required package 'ctags' not found.                         *\n* Type 'make packages' to install all packages, or            *\n* 'sudo apt-get install exuberant-ctags' to install manually. *\n***************************************************************\n\n\n\n"; fi; fi
@@ -36,15 +36,11 @@ libcommon_c++: libcommon_c/pcre
 
 ace2: abc_with_bb_support
 clean:
-	@ cd ODIN_II && make clean
-	@ cd abc_with_bb_support && make clean
-	@ cd ace2 && make clean
-	@ cd vpr && make clean
-	@ cd libarchfpga && make clean
-	@ cd libcommon_c++ && make clean
-	@ cd libcommon_c/pcre && make clean
+	for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir $@; \
+	done
 
 clean_vpr:
-	@ cd vpr && make clean
+	$(MAKE) -C vpr
 
-.PHONY: packages subdirs $(SUBDIRS)
+.PHONY: clean clean_vpr packages subdirs $(SUBDIRS)
